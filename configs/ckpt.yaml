@@ -1,0 +1,8 @@
+# Ladder step 3: step 2 + gradient checkpointing per transformer block.
+# Same batch size as the other steps so the comparison is fair; the memory it
+# frees is what would let you raise batch_size.
+inherit: fused.yaml
+run_name: ckpt
+ladder_step: "3"
+model:
+  grad_ckpt: true

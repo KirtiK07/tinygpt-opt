@@ -1,0 +1,6 @@
+torch>=2.3
+numpy
+tiktoken
+pyyaml
+pytest
+matplotlib

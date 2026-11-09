@@ -1,0 +1,6 @@
+# Ladder step 2: step 1 + fused attention (F.scaled_dot_product_attention).
+inherit: amp.yaml
+run_name: fused
+ladder_step: "2"
+model:
+  attn_impl: fused

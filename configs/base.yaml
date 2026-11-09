@@ -1,0 +1,35 @@
+# Ladder step 0: fp32 baseline with hand-written attention.
+# Every later config inherits this one, so model, data and step count stay the same.
+run_name: base
+ladder_step: "0"
+seed: 1337
+dataset: tinystories
+data_dir: data/tinystories
+out_dir: out
+
+model:
+  vocab_size: 50304
+  block_size: 256
+  n_layer: 6
+  n_head: 6
+  n_embd: 384
+  dropout: 0.0
+  bias: true
+  attn_impl: manual
+  grad_ckpt: false
+
+batch_size: 32
+grad_accum: 1
+max_steps: 2000
+lr: 6.0e-4
+min_lr: 6.0e-5
+warmup_steps: 100
+weight_decay: 0.1
+grad_clip: 1.0
+
+amp: false
+compile: false
+
+eval_interval: 250
+eval_iters: 50
+log_interval: 10

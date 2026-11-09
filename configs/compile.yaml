@@ -1,0 +1,7 @@
+# Ladder step 4: step 3 + torch.compile. The first steps include compilation,
+# which timing_skip_steps leaves out of tokens/sec.
+inherit: ckpt.yaml
+run_name: compile
+ladder_step: "4"
+compile: true
+timing_skip_steps: 50

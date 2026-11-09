@@ -1,0 +1,7 @@
+# Ladder step 1: fp16 mixed precision with loss scaling (torch.autocast + GradScaler).
+inherit: base.yaml
+run_name: amp
+ladder_step: "1"
+amp: true
+amp_dtype: float16   # the T4 has no bf16 support
+grad_scaler: true

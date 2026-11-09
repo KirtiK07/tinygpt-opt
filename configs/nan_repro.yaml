@@ -1,0 +1,16 @@
+# Debugging case study, part 1: break it.
+# fp16 without loss scaling, 10x learning rate, no clipping, no warm-up.
+# Logs per-layer gradient norms every step and stops on the first non-finite loss.
+inherit: amp.yaml
+run_name: nan_repro
+grad_scaler: false
+lr: 6.0e-3
+min_lr: 6.0e-3
+warmup_steps: 0
+grad_clip: 0.0
+max_steps: 1000
+log_interval: 1
+log_grad_norms: true
+stop_on_nonfinite: true
+write_results: false
+sample_tokens: 0

@@ -1,0 +1,8 @@
+# Fast smoke test on Tiny Shakespeare. Not part of the ladder.
+inherit: base.yaml
+run_name: shakespeare_smoke
+dataset: shakespeare
+data_dir: data/shakespeare
+max_steps: 500
+eval_interval: 100
+write_results: false

@@ -1,0 +1,4 @@
+﻿title: TinyGPT-Opt
+description: Transformer training & inference optimization in PyTorch
+theme: jekyll-theme-cayman
+exclude: [tests, configs, notebooks, tinygpt, requirements.txt, pytest.ini]

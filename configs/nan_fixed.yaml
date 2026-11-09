@@ -1,0 +1,7 @@
+# Debugging case study, part 2: fix it.
+# Same run, with loss scaling back on and gradient clipping at max norm 1.0.
+# softmax and LayerNorm already run in fp32 under autocast.
+inherit: nan_repro.yaml
+run_name: nan_fixed
+grad_scaler: true
+grad_clip: 1.0

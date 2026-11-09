@@ -1,0 +1,10 @@
+data/
+out/
+*.pt
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+.ipynb_checkpoints/
+# private planning notes
+*.pdf
