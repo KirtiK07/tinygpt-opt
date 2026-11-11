@@ -142,7 +142,7 @@ What the numbers show:
 - **Every training rung reached the same validation loss** (2.0344 to 2.0354), so none of the
   optimizations changed what the model learned.
 - **The KV-cache was *slower* at batch size 1** (0.70×), the one result that went against the plan.
-  With a 30M model and at most 232 tokens of context, recomputing the full sequence is a single
+  The likely reason (not yet profiled): with a 30M model and at most 232 tokens of context, recomputing the full sequence is a single
   small GPU launch per layer, while the cached path adds a `torch.cat` and more, smaller kernel
   launches every step. Batch 1 is launch-overhead bound, so the saved FLOPs don't show. The cache
   still used 15% less memory. Once there's enough work per launch (batch 16), throughput rose 15×
@@ -248,16 +248,41 @@ From the step-4 model after 2,000 steps (about 16M training tokens), prompt "Onc
 ## How a coding agent was used
 
 The first version of this repo was generated with Claude Code from the project plan: the package
-layout, model, training loop, benchmarks, configs, tests and this README. Running the test suite
-during generation caught two real bugs before the first commit:
+layout, model, training loop, benchmarks, configs, tests and this README. **Division of work.** The author set the plan, the scope and the rules (CPU-testable code, only
+measured numbers in the README) and ran every GPU run on a Colab T4. The agent wrote the code,
+ran the tests locally, analyzed the run outputs and drafted the write-ups. The agent couldn't touch
+the GPU, so every number here comes from a run the author started.
+
+**Tests as the agent's guardrail.** The rule was that no optimization counts until a test proves it
+matches the reference. Running the suite during generation caught three real bugs before the
+first commit:
 
 - `F.cross_entropy` used `.view()` on non-contiguous targets. It now uses `.reshape()`.
+- The embedding lookup failed on non-contiguous token tensors in the quantized model, fixed with
+  `idx.contiguous()`.
 - The first int8 version quantized only `nn.Linear`. With tied embeddings, the result was *larger*
-  than fp32. Quantizing the embeddings as well fixed it, and a size test now guards against it.
+  than fp32 (95.9 MB vs 87.6 MB). Quantizing the embeddings as well fixed it, and a size test now
+  guards against it.
 
-*TODO (author):* note what you reviewed, rewrote by hand and changed after running on the T4.
-The plan says the model code should be written and understood by you, so go through
-`tinygpt/model.py` line by line.
+**What changed once it hit real hardware.**
+
+- The first full Colab run finished, but the runtime disconnected before the results were
+  downloaded, and everything was lost. The notebook now writes `results/` and `out/` straight to
+  Google Drive through symlinks, so a disconnect can't erase a run.
+- A bf16 smoke run on CPU hung for more than 10 minutes, so the local smoke test runs in fp32. The
+  GPU runs use fp16, the precision the T4's tensor cores support.
+- Two results went against the plan, and they're reported as measured rather than tuned away.
+  The KV-cache was slower at batch size 1, and loss scaling alone didn't stop the high-LR NaN.
+  The NaN explanation comes from the logged per-layer gradient norms and loss scale. The KV-cache
+  explanation (launch overhead at batch 1) fits the batch-16 result but hasn't been profiled yet.
+  Neither was re-run until the numbers looked better.
+
+**Lesson.** The agent was fastest at scaffolding and at checking its own code against tests. The
+places it needed a human were judgment calls: what counts as an honest number, and when a
+surprising result is the finding rather than a bug.
+
+<!-- Author's review: add one or two lines on what you read through or changed by hand,
+e.g. after going through tinygpt/model.py line by line. -->
 
 ## Definition of done
 
