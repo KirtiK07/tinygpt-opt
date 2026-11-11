@@ -8,10 +8,16 @@ so every speedup comes with proof that the outputs didn't change.
 
 Target hardware: Google Colab free tier, NVIDIA T4 (16 GB).
 
-> **Status:** code, configs and the test suite are done, and the tests pass on CPU.
-> The GPU runs that produce the numbers below haven't been run yet. Every table cell marked
-> *not measured yet* gets filled from `results/results.csv` after running on a T4.
-> Only real measured numbers go here.
+## Headline results (measured on a Colab T4, 2026-11-11)
+
+- **Training: 3.97× tokens/sec** (13,929 → 55,318) and **31% lower peak GPU memory**
+  (6,543 → 4,499 MB) from the full training ladder. Validation loss is unchanged (2.0354 → 2.0346).
+- **Inference: 15× generation throughput** (241 → 3,633 tokens/sec) with KV-cache + batching.
+- **CPU int8: 2.25× faster per token and 2.4× smaller** (114.7 → 47.6 MB).
+- **fp16 NaN** reproduced, diagnosed with per-layer gradient norms, and the loss-scaling part fixed.
+
+Every number comes from [`results/results.csv`](results/results.csv), written by the runs in
+[`notebooks/colab_run.ipynb`](notebooks/colab_run.ipynb).
 
 ## What it covers
 
@@ -106,29 +112,48 @@ Each step is added on top of the previous one, with the same model, data, seed, 
 step count (`tests/test_repro.py::test_ladder_configs_stack` enforces this). Training tokens/sec
 leaves out the warm-up steps, which also covers `torch.compile`'s compile time.
 
-| # | Technique | Stage | How | tokens/sec | Peak GPU memory | Val loss |
+Training: TinyStories (300K-story subset), 2,000 steps, batch 32 × 256 tokens, Tesla T4.
+
+| # | Technique | How | tokens/sec | vs step 0 | Peak GPU memory | vs step 0 | Val loss |
+|---|---|---|---|---|---|---|---|
+| 0 | Baseline: fp32, manual attention | plain loop | 13,929 | 1.00× | 6,543 MB | — | 2.0354 |
+| 1 | Mixed precision (fp16 + loss scaling) | `torch.autocast` + `GradScaler` | 37,605 | 2.70× | 6,243 MB | −5% | 2.0344 |
+| 2 | Fused attention | `F.scaled_dot_product_attention` | 42,553 | 3.05× | 5,810 MB | −11% | 2.0346 |
+| 3 | Gradient checkpointing | `torch.utils.checkpoint` per block | 39,754 | 2.85× | 5,204 MB | −20% | 2.0346 |
+| 4 | `torch.compile` | `torch.compile(model)` | **55,318** | **3.97×** | **4,499 MB** | **−31%** | 2.0346 |
+
+Inference: prompt of 32 tokens, 200 new tokens, greedy (GPU); 64 new tokens, 1 thread (CPU).
+
+| # | Technique | Device | How | tokens/sec | ms / token | Peak memory / model size |
 |---|---|---|---|---|---|---|
-| 0 | Baseline: fp32, manual attention | Training | plain loop | *not measured yet* | *not measured yet* | *not measured yet* |
-| 1 | Mixed precision (fp16 + loss scaling) | Training | `torch.autocast` + `GradScaler` | *not measured yet* | *not measured yet* | *not measured yet* |
-| 2 | Fused attention | Training | `F.scaled_dot_product_attention` | *not measured yet* | *not measured yet* | *not measured yet* |
-| 3 | Gradient checkpointing | Training | `torch.utils.checkpoint` per block | *not measured yet* | *not measured yet* | *not measured yet* |
-| 4 | `torch.compile` | Training | `torch.compile(model)` | *not measured yet* | *not measured yet* | *not measured yet* |
+| 5-ref | No cache (reference) | T4 | full recompute each token | 241 | 4.16 | 560 MB |
+| 5 | KV-cache, batch 1 | T4 | cache keys/values per layer | 168 (0.70×) | 5.95 | 478 MB |
+| 6 | KV-cache + batch 16 | T4 | 16 prompts at once | **3,633 (15.1×)** | 4.40 per step | 607 MB |
+| 7-ref | fp32 (reference) | CPU | | 73 | 13.73 | 114.7 MB |
+| 7 | int8 dynamic quantization | CPU | `quantize_dynamic` | **164 (2.25×)** | **6.09** | **47.6 MB (−58%)** |
 
-| # | Technique | Stage | How | tokens/sec | ms / token | Model size |
-|---|---|---|---|---|---|---|
-| 5-ref | No cache (reference) | Inference (GPU) | full recompute each token | *not measured yet* | *not measured yet* | |
-| 5 | KV-cache | Inference (GPU) | cache keys/values per layer | *not measured yet* | *not measured yet* | |
-| 6 | Batched generation | Inference (GPU) | 16 prompts at once | *not measured yet* | *not measured yet* | |
-| 7-ref | fp32 (reference) | Inference (CPU) | | *not measured yet* | *not measured yet* | *not measured yet* |
-| 7 | int8 dynamic quantization | Inference (CPU) | `quantize_dynamic` | *not measured yet* | *not measured yet* | *not measured yet* |
+What the numbers show:
 
-`python -m tinygpt.profile report` prints this table filled in, with each step as a change from
-its baseline (for example "1.8× tokens/sec, −42% peak memory").
+- **Mixed precision is the biggest single win (2.7×).** The T4's tensor cores only run fp16.
+  Validation loss matched fp32 to 0.001.
+- **Gradient checkpointing traded speed for memory, as expected.** −7% tokens/sec against step 2
+  for −10% peak memory. `torch.compile` then won the speed back and cut memory further by
+  fusing elementwise ops (+39% tokens/sec, −14% memory against step 3).
+- **Every training rung reached the same validation loss** (2.0344 to 2.0354), so none of the
+  optimizations changed what the model learned.
+- **The KV-cache was *slower* at batch size 1** (0.70×), the one result that went against the plan.
+  With a 30M model and at most 232 tokens of context, recomputing the full sequence is a single
+  small GPU launch per layer, while the cached path adds a `torch.cat` and more, smaller kernel
+  launches every step. Batch 1 is launch-overhead bound, so the saved FLOPs don't show. The cache
+  still used 15% less memory. Once there's enough work per launch (batch 16), throughput rose 15×
+  over the reference. The tests confirm the cached and uncached outputs are token-for-token identical.
+- **int8 on CPU** halved the per-token latency and cut the file size by 58%.
 
-Charts (written by `python -m tinygpt.profile plot`):
+`python -m tinygpt.profile report` prints this table from `results/results.csv`.
 
-- `results/throughput.png`: training tokens/sec per step. *Not generated yet.*
-- `results/peak_memory.png`: peak GPU memory per step. *Not generated yet.*
+![Training throughput per ladder step](results/throughput.png)
+
+![Peak GPU memory per ladder step](results/peak_memory.png)
 
 Notes on the int8 step:
 
@@ -157,11 +182,10 @@ Every optimization has to pass before its numbers count.
 
 Current status on CPU (PyTorch 2.15): **27 passed, 1 skipped** (the skip is the GPU-only fp16
 training test). `torch.compile` isn't covered by a unit test because compiling on CPU needs a
-C++ toolchain. On the T4, its correctness shows as matching validation loss against step 3.
+C++ toolchain. On the T4, its correctness shows as matching validation loss against step 3:
+2.0346 for both.
 
 ## Numerical debugging case study: fp16 NaN
-
-*Plots and observed numbers get added after running on the T4.*
 
 1. **Break it.** `configs/nan_repro.yaml`: fp16 autocast with `GradScaler` off, 10× learning rate,
    no warm-up, no clipping.
@@ -182,8 +206,44 @@ C++ toolchain. On the T4, its correctness shows as matching validation loss agai
    python -m tinygpt.train --config configs/nan_fixed.yaml
    python -m tinygpt.profile nan_plot     # results/nan_loss.png, results/nan_grad_norms.png
    ```
-5. **Write it up.** *TODO after the GPU run:* the step where it broke, which layer's gradient norm blew
-   up first, what `detect_anomaly` reported, and the before/after loss curves.
+5. **What actually happened on the T4.**
+
+   **Broken run (no loss scaling).** It stopped with a NaN loss at **step 391**. The per-layer
+   gradient norms show the real failure came much earlier. From **step 11**, the gradients of
+   all six transformer blocks underflowed to exactly 0 in fp16, and stayed at zero in 295 of the
+   next 380 steps. Only the token embedding (which also gets gradient through the tied `lm_head`)
+   and the final LayerNorm kept learning. With the network frozen and the high learning rate
+   pushing the embeddings around, the loss *rose* from 6.3 to 8.3, and then the forward pass
+   overflowed.
+
+   **Fixed run (loss scaling + clipping).** No layer's gradient ever went to zero, and the loss
+   fell to about 4.4, compared with 8.3 for the broken run at the same point. The scaler did its
+   job: it lowered the scale from 65,536 to 8,192 as it skipped steps whose gradients overflowed.
+   That fixed the underflow.
+
+   **What loss scaling didn't fix.** At this learning rate (6e-3, 10× normal, no warm-up), the
+   fixed run still produced a NaN *loss* at **step 619**. A NaN loss means the forward pass
+   overflowed, and loss scaling only protects gradients. So the remaining cause is the learning
+   rate itself. The evidence: the same fp16 + `GradScaler` setup at the normal learning rate
+   (ladder step 1) trained all 2,000 steps cleanly, with a validation loss of 2.0344 (fp32 got
+   2.0354). The full fix is loss scaling *and* a sane learning rate with warm-up. bf16 would avoid
+   the overflow too, but the T4 has no bf16 tensor cores.
+
+   ![Loss: fp16 without vs with loss scaling](results/nan_loss.png)
+
+   ![Per-layer gradient norms in the broken run](results/nan_grad_norms.png)
+
+   The block lines drop off the log scale where their gradients are exactly zero.
+
+## Sample output
+
+From the step-4 model after 2,000 steps (about 16M training tokens), prompt "Once upon a time":
+
+> Once upon a time, in a small town, there was a cow named Lily. Lily was a nervous girl who loved
+> to play with her friends. One day, Lily saw a big box in the park. She wanted to open the box.
+> Lily tried to open the box, but it was hard. She was very curious. She asked her friend, the bird,
+> "Can you help me open the box?" Her friend said, "Yes, let's open the box!" Lily and the bird
+> opened the box. Inside, they found a big, shiny balloon. Lily was very happy and clapped her hands.
 
 ## How a coding agent was used
 
@@ -201,11 +261,11 @@ The plan says the model code should be written and understood by you, so go thro
 
 ## Definition of done
 
-- [ ] Model trains from scratch and produces readable sample stories
+- [x] Model trains from scratch and produces readable sample stories (sample below)
 - [x] One command reproduces the baseline run from a config file
-- [ ] All 8 ladder steps measured and logged in `results.csv`
-- [x] All tests in `tests/` pass (CPU; rerun on the T4)
-- [ ] fp16 NaN case study written up with plots
-- [ ] README has the results table, two charts, setup steps and a coding-agent workflow section (charts and numbers pending)
+- [x] All 8 ladder steps measured and logged in `results.csv`
+- [x] All tests in `tests/` pass (CPU, and in CI on every push)
+- [x] fp16 NaN case study written up with plots
+- [x] README has the results table, two charts, setup steps and a coding-agent workflow section
 - [x] Repo is public
 - [ ] Pinned on GitHub and linked from the resume

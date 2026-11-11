@@ -1,0 +1,11 @@
+timestamp,ladder_step,technique,stage,device,tokens_per_sec,peak_mem_mb,val_loss,latency_ms_per_token,model_size_mb,notes
+2026-11-11T17:04:15+00:00,0,base,train,Tesla T4,13929,6543,2.0354,,,"2000 steps, batch 32x256"
+2026-11-11T17:12:14+00:00,1,amp,train,Tesla T4,37605,6243,2.0344,,,"2000 steps, batch 32x256"
+2026-11-11T17:19:18+00:00,2,fused,train,Tesla T4,42553,5810,2.0346,,,"2000 steps, batch 32x256"
+2026-11-11T17:26:49+00:00,3,ckpt,train,Tesla T4,39754,5204,2.0346,,,"2000 steps, batch 32x256"
+2026-11-11T17:33:07+00:00,4,compile,train,Tesla T4,55318,4499,2.0346,,,"2000 steps, batch 32x256"
+2026-11-11T17:33:16+00:00,5-ref,no KV-cache (reference),inference,Tesla T4,241,560,,4.16,,"prompt 32, 200 new tokens, greedy"
+2026-11-11T17:33:20+00:00,5,KV-cache,inference,Tesla T4,168,478,,5.95,,"prompt 32, 200 new tokens, greedy"
+2026-11-11T17:33:23+00:00,6,KV-cache + batch 16,inference,Tesla T4,3633,607,,4.40,,"prompt 32, 200 new tokens, greedy"
+2026-11-11T17:33:28+00:00,7-ref,fp32 CPU,inference,cpu,73,,,13.73,114.7,"prompt 32, 64 new tokens, threads 1"
+2026-11-11T17:33:29+00:00,7,int8 dynamic CPU,inference,cpu,164,,,6.09,47.6,"prompt 32, 64 new tokens, threads 1"
