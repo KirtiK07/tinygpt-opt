@@ -8,3 +8,6 @@ venv/
 .ipynb_checkpoints/
 # private planning notes
 *.pdf
+
+# raw Colab download (contents already in results/)
+results.zip
